@@ -1,0 +1,21 @@
+{"text": "Credit card 4111 1111 1111 1111 expires 05/27", "expected_entities": [{"text": "4111 1111 1111 1111", "label": "CREDIT_CARD", "start": 12, "end": 31}, {"text": "05/27", "label": "DATE_TIME", "start": 40, "end": 45}]}
+{"text": "We arrived at Victoria around noon and had lunch there.", "expected_entities": [{"label": "LOCATION", "text": "Victoria", "start": 14, "end": 22}, {"label": "DATE_TIME", "text": "around noon", "start": 23, "end": 34}]}
+{"text": "Contact Jane at jane.doe@example.com for more details.", "expected_entities": ["EMAIL_ADDRESS", "PERSON"]}
+{"text": "Call me at (415) 555-1234 anytime", "expected_entities": ["PHONE_NUMBER"]}
+{"text": "Ship my package to 1600 Amphitheatre Parkway, Mountain View, CA 94043.", "expected_entities": ["LOCATION"]}
+{"text": "John was born on 12/07/1990.", "expected_entities": ["PERSON", "DATE_TIME"]}
+{"text": "My name is Andrew(redacted) Nedry and my email is you.didnt.say.the.magic.word@gmail.com", "expected_entities": ["PERSON", "EMAIL_ADDRESS"]}
+{"text": "My new IP is 192.168.1.15, please whitelist it.", "expected_entities": ["IP_ADDRESS"]}
+{"text": "Reach out to Dr. Susan Calvin at scalvin@usrobots.com for an appointment.", "expected_entities": ["PERSON", "EMAIL_ADDRESS"]}
+{"text": "Call the London office at +44 20 7946 0958 next Monday morning.", "expected_entities": ["PHONE_NUMBER", "DATE_TIME", "LOCATION"]}
+{"text": "Passport number X12345678 belongs to Maria Gomez.", "expected_entities": ["US_PASSPORT", "PERSON"]}
+{"text": "Bob's credit card 5500 0000 0000 0004 expires 11/30.", "expected_entities": ["PERSON", "CREDIT_CARD", "DATE_TIME"]}
+{"text": "Server logs show 10.0.0.42 accessed the system at 2025‑05‑01 14:03:21 UTC.", "expected_entities": ["IP_ADDRESS", "DATE_TIME"]}
+{"text": "Send the invoice to 742 Evergreen Terrace, Springfield, IL 62704.", "expected_entities": ["LOCATION"]}
+{"text": "Our meeting is scheduled for 18th July 2025 at 3PM PST.", "expected_entities": ["DATE_TIME"]}
+{"text": "Contact our Paris branch: 33 Rue La Fayette, 75009 Paris.", "expected_entities": ["LOCATION", "LOCATION"]}
+{"text": "Emergency line: (212)555‑9999 — available 24/7.", "expected_entities": ["PHONE_NUMBER"]}
+{"text": "Anna Karenina was born on 07‑09‑1978 in Saint Petersburg.", "expected_entities": ["PERSON", "DATE_TIME", "LOCATION"]}
+{"text": "Wire transfer routing number 021000021 for Chase Manhattan.", "expected_entities": ["ABA_ROUTING_NUMBER"]}
+{"text": "Latitude 37.4220, Longitude ‑122.0841 marks the HQ.", "expected_entities": ["LOCATION"]}
+{"text": "Student email: s001234@university.edu; advisor: Prof. Emily Stone.", "expected_entities": ["EMAIL_ADDRESS", "PERSON"]}
