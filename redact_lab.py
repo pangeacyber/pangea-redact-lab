@@ -64,7 +64,8 @@ from typing import Dict, List, Set, Tuple
 
 import datetime as _dt
 import statistics as _stats
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Semaphore
 
 import requests
 import re
@@ -211,31 +212,27 @@ def match_effective(exp: List[Dict], act: List[Dict], redacted_text: str) -> Tup
       • expected span is wholly contained within the actual span, OR
       • expected coords are missing (wild‑card).
     """
+    # Early return: if all expected entities have no valid spans, skip Base evaluation
+    if all(e["start"] is None or e["end"] is None for e in exp):
+        return 0, 0, 0  # No span-based matching possible for Base tier
     tp = fp = fn = 0
     act_unused = act.copy()
     for e in exp:
         matched = None
         for a in act_unused:
-            if e["label"] != a["label"]:
-                continue
+            # Allow label mismatch for Base tier if redaction occurred over expected text span
             if e["start"] is None or e["end"] is None:
                 matched = a
                 break
-            if expected_within_actual(e, a):
+            if expected_within_actual(e, a) or (e["start"] < a["end"] and a["start"] < e["end"]):
                 matched = a
                 break
-            # fallback: any overlap
-            if e["start"] < a["end"] and a["start"] < e["end"]:
-                matched = a
-                break
-        if matched:
-            # Confirm the literal text is gone from redacted output; otherwise count as FN
-            if e.get("text") and e["text"] in redacted_text:
-                matched = None  # treat as not matched
-            else:
-                tp += 1
-                act_unused.remove(matched)
-                matched = "counted"
+        # Check if redaction occurred over expected text span and expected text is no longer present
+        if matched and e.get("text") and e["text"] not in redacted_text:
+            tp += 1
+            act_unused.remove(matched)
+            matched = "counted"
+        # fallback: only count as FN if not already counted
         if matched != "counted":
             fn += 1
     fp = len(act_unused)
@@ -254,13 +251,11 @@ def match_correct(exp: List[Dict], act: List[Dict]) -> Tuple[int, int, int]:
     for e in exp:
         hit = None
         for a in act_unused:
-            if e["label"] != a["label"]:
-                continue
-            # Wild‑card coords ⇒ auto‑match
+            # Wild‑card coords ⇒ auto‑match on any label
             if e["start"] is None or e["end"] is None:
                 hit = a
                 break
-            # Exact coordinate match required
+            # Exact coordinate match on any label
             if a["start"] == e["start"] and a["end"] == e["end"]:
                 hit = a
                 break
@@ -390,6 +385,20 @@ def metrics(tp: int, fp: int, fn: int, correct: int, total: int, duration_sum: f
         "examples_fully_correct": correct,
     }
 
+def rate_limited(max_per_second):
+    min_interval = 1.0 / float(max_per_second) if max_per_second > 0 else 0.0
+    def decorator(func):
+        last_call = [0.0]                 # mutable closure
+        def wrapped(*args, **kwargs):
+            if min_interval:
+                wait = min_interval - (time.time() - last_call[0])
+                if wait > 0:
+                    time.sleep(wait)
+            result = func(*args, **kwargs)
+            last_call[0] = time.time()
+            return result
+        return wrapped
+    return decorator
 
 def main() -> None:
     ap = argparse.ArgumentParser(
@@ -397,7 +406,7 @@ def main() -> None:
     )
     ap.add_argument("-i", "--input_files", nargs="+", required=True,
                     help="One or more JSONL files containing test examples.")
-    ap.add_argument("--output_metrics", help="Write metrics JSON to this path.")
+    ap.add_argument("--output_metrics", help="Path to write summary metrics (JSON format).")
     ap.add_argument("--fp_out", help="Write false positives JSONL to this path.")
     ap.add_argument("--fn_out", help="Write false negatives JSONL to this path.")
     ap.add_argument("--include_partials", action="store_true",
@@ -407,6 +416,136 @@ def main() -> None:
     ap.add_argument("--verbose", action="store_true",
                     help="Print detailed FP/FN examples to stdout.")
     args = ap.parse_args()
+
+    # ---------- threaded execution setup ----------
+    max_workers = int(args.rps) if args.rps >= 1 else 1
+    semaphore = Semaphore(max_workers)
+
+    @rate_limited(args.rps)
+    def process_example(idx_ex, ex, total):
+        # acquire a slot in the pool
+        with semaphore:
+            nonlocal tp_eff, fp_eff, fn_eff
+            nonlocal tp_cor, fp_cor, fn_cor, tp_fac, fp_fac, fn_fac
+            nonlocal correct_eff_cnt, correct_cor_cnt, correct_fac_cnt
+            nonlocal considered_cnt, duration_sum, remote_latencies
+            nonlocal args
+
+            # progress bar
+            prog = (idx_ex + 1) / total * 100
+            print("\r\033[2K", end="")
+            print(f"{prog:.2f}%", end="\r", flush=True)
+
+            text = ex["text"]
+
+            # Build expected_entities list of dicts (same logic as original loop)
+            if "entities" in ex:
+                expected_entities = ex["entities"]
+            elif "expected_entities" in ex:
+                exp_val = ex["expected_entities"]
+                if exp_val and isinstance(exp_val[0], dict) and "label" in exp_val[0]:
+                    expected_entities = exp_val
+                else:
+                    expected_entities = [
+                        {"label": lbl, "text": None, "start": None, "end": None}
+                        for lbl in exp_val
+                    ]
+            else:
+                expected_entities = []
+
+            try:
+                start_time = time.time()
+                actual_entities, api_raw = call_redact_api(base_url, token, text)
+
+                # Validate removal of expected text
+                redacted_output = api_raw.get("result", {}).get("redacted_text", "") or ""
+                for ent in expected_entities:
+                    ent_txt = ent.get("text")
+                    if not ent_txt:
+                        continue
+                    if ent_txt not in text:
+                        print(f"[WARN] Example #{idx_ex+1}: expected entity text '{ent_txt}' not found in original input.",
+                              file=sys.stderr)
+                    elif ent_txt in redacted_output and args.verbose:
+                        print(f"[WARN] Example #{idx_ex+1}: expected entity text '{ent_txt}' still present after redaction.",
+                              file=sys.stderr)
+
+                # Measure latency
+                duration = time.time() - start_time
+                duration_sum += duration
+                req_ts = api_raw.get("request_time") or api_raw.get("meta", {}).get("request_time")
+                resp_ts = api_raw.get("response_time") or api_raw.get("meta", {}).get("response_time")
+                try:
+                    if req_ts and resp_ts:
+                        req_dt = _dt.datetime.fromisoformat(req_ts.replace("Z", "+00:00"))
+                        resp_dt = _dt.datetime.fromisoformat(resp_ts.replace("Z", "+00:00"))
+                        remote_latencies.append((resp_dt - req_dt).total_seconds())
+                except Exception:
+                    pass
+            except Exception as e:
+                print(f"[ERROR] Example #{idx_ex+1} failed: {e}", file=sys.stderr)
+                return
+
+            # Tiered metrics
+            eff_tp, eff_fp, eff_fn = match_effective(expected_entities, actual_entities, redacted_output)
+            cor_tp, cor_fp, cor_fn = match_correct(expected_entities, actual_entities)
+            fac_tp, fac_fp, fac_fn = match_factual(expected_entities, actual_entities)
+
+            tp_eff += eff_tp; fp_eff += eff_fp; fn_eff += eff_fn
+            tp_cor += cor_tp; fp_cor += cor_fp; fn_cor += cor_fn
+            tp_fac += fac_tp; fp_fac += fac_fp; fn_fac += fac_fn
+
+            tp_e, fp_e, fn_e, exp_unmatched, act_unmatched = match_entities(expected_entities, actual_entities)
+
+            considered_cnt += 1
+            full_ok_eff = (eff_fp == 0 and eff_fn == 0)
+            full_ok_cor = (cor_fp == 0 and cor_fn == 0)
+            full_ok_fac = (fac_fp == 0 and fac_fn == 0)
+
+            if args.include_partials or full_ok_eff:
+                correct_eff_cnt += 1 if full_ok_eff else 0
+            if args.include_partials or full_ok_cor:
+                correct_cor_cnt += 1 if full_ok_cor else 0
+            if args.include_partials or full_ok_fac:
+                correct_fac_cnt += 1 if full_ok_fac else 0
+
+            fp_labels = [a["label"] for a in act_unmatched]
+            fn_labels = [e["label"] for e in exp_unmatched]
+
+            if not fp_labels and cor_fp:
+                fp_labels = [a["label"] for a in actual_entities
+                             if (a["label"], a["start"], a["end"]) not in
+                             {(e["label"], e["start"], e["end"]) for e in expected_entities}]
+
+            # ----------------------------------------------------------------
+            # Persist FP / FN details per efficacy tier
+            def _write(handle, labels):
+                if handle and labels:
+                    handle.write(json.dumps({
+                        "text": text,
+                        "redacted_text": api_raw.get("result", {}).get("redacted_text"),
+                        "expected_entities": expected_entities,
+                        "actual_entities": actual_entities,
+                        "labels": labels
+                    }, ensure_ascii=False) + "\n")
+
+            # Base tier
+            _write(base_fp_handle, fp_labels if eff_fp else [])
+            _write(base_fn_handle, fn_labels if eff_fn else [])
+
+            # Correct tier
+            _write(correct_fp_handle, fp_labels if cor_fp else [])
+            _write(correct_fn_handle, fn_labels if cor_fn else [])
+
+            # Factual tier
+            _write(factual_fp_handle, fp_labels if fac_fp else [])
+            _write(factual_fn_handle, fn_labels if fac_fn else [])
+
+            if args.verbose and (fp_e or fn_e):
+                if fp_e:
+                    print(f"[FP] #{idx_ex+1}: {fp_labels} was redacted | '{text}'")
+                if fn_e:
+                    print(f"[FN] #{idx_ex+1}: {fn_labels} was not redacted in | '{text}'")
 
     base_url = os.getenv("PANGEA_BASE_URL") or os.getenv("PANGEA_REDACT_BASE_URL")
     token = os.getenv("PANGEA_REDACT_TOKEN")
@@ -428,148 +567,60 @@ def main() -> None:
     total_examples = len(examples)
     print(f"Loaded {total_examples} test case{'s' if total_examples != 1 else ''}.")
 
-    # Prepare optional output handles
-    fp_handle = open(args.fp_out, "w", encoding="utf-8") if args.fp_out else None
-    fn_handle = open(args.fn_out, "w", encoding="utf-8") if args.fn_out else None
+    # ------------------------------------------------------------------
+    # Tier‑specific FP / FN output handles
+    def _tier_file(base_path: str, tier: str, kind: str):
+        """
+        Derive filenames like  redact_test.base.fps.jsonl  or  redact_test.factual.fns.jsonl
+        where *tier* ∈ {base, correct, factual} and *kind* ∈ {fps, fns}.
+        """
+        stem = base_path.rsplit(".", 1)[0]
+        return open(f"{stem}.{tier}.{kind}.jsonl", "w", encoding="utf-8")
+
+    if args.fp_out:
+        base_fp_handle     = _tier_file(args.fp_out, "base",    "fps")
+        correct_fp_handle  = _tier_file(args.fp_out, "correct", "fps")
+        factual_fp_handle  = _tier_file(args.fp_out, "factual", "fps")
+    else:
+        base_fp_handle = correct_fp_handle = factual_fp_handle = None
+
+    if args.fn_out:
+        base_fn_handle     = _tier_file(args.fn_out, "base",    "fns")
+        correct_fn_handle  = _tier_file(args.fn_out, "correct", "fns")
+        factual_fn_handle  = _tier_file(args.fn_out, "factual", "fns")
+    else:
+        base_fn_handle = correct_fn_handle = factual_fn_handle = None
 
     tp_sum = fp_sum = fn_sum = 0
-    correct_cnt = considered_cnt = 0
+    considered_cnt = 0
     duration_sum = 0.0
     remote_latencies: List[float] = []  # collect each (response_time - request_time)
-    interval = 1.0 / args.rps if args.rps > 0 else 0.0
-    last = 0.0
+
     # Multi-tier counters
     tp_eff=fp_eff=fn_eff=0
     tp_cor=fp_cor=fn_cor=0
     tp_fac=fp_fac=fn_fac=0
+    correct_eff_cnt = correct_cor_cnt = correct_fac_cnt = 0
 
-    for idx, ex in enumerate(examples, 1):
-        # Simple RPS throttling
-        wait = interval - (time.time() - last)
-        if wait > 0:
-            time.sleep(wait)
+    # ---------- run in ThreadPoolExecutor ----------
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futs = [
+            pool.submit(process_example, i, ex, total_examples)
+            for i, ex in enumerate(examples)
+        ]
+        for _ in as_completed(futs):
+            pass        # simply wait for all to finish
 
-        # Progress indicator
-        progress = idx / total_examples * 100
-        print(f"\r{progress:6.2f}% complete", end="", flush=True)
-
-        text = ex["text"]
-        # Build expected_entities list of dicts
-        if "entities" in ex:
-            expected_entities = ex["entities"]
-        elif "expected_entities" in ex:
-            exp_val = ex["expected_entities"]
-            if exp_val and isinstance(exp_val[0], dict) and "label" in exp_val[0]:
-                # already detailed dicts
-                expected_entities = exp_val
-            else:
-                # simple label list
-                expected_entities = [
-                    {"label": lbl, "text": None, "start": None, "end": None}
-                    for lbl in exp_val
-                ]
-        else:
-            expected_entities = []
-        try:
-            start_time = time.time()
-            actual_entities, api_raw = call_redact_api(base_url, token, text)
-            # -----------------------------------------------------------------
-            # Base‑tier sanity: make sure every expected entity's text is
-            #   • present in the original input
-            #   • absent from the redacted output
-            redacted_output = api_raw.get("result", {}).get("redacted_text", "") or ""
-            for ent in expected_entities:
-                ent_txt = ent.get("text")
-                if not ent_txt:
-                    continue  # nothing to validate
-                if ent_txt not in text:
-                    print(f"[WARN] Example #{idx}: expected entity text '{ent_txt}' "
-                          f"not found in original input.", file=sys.stderr)
-                elif ent_txt in redacted_output:
-                    if args.verbose:
-                        print(f"[WARN] Example #{idx}: expected entity text '{ent_txt}' "
-                              f"still present after redaction.", file=sys.stderr)
-            duration = time.time() - start_time
-            duration_sum += duration
-            # Remote latency based on timestamps returned by the API
-            req_ts = api_raw.get("request_time") or api_raw.get("meta", {}).get("request_time")
-            resp_ts = api_raw.get("response_time") or api_raw.get("meta", {}).get("response_time")
-            try:
-                if req_ts and resp_ts:
-                    req_dt = _dt.datetime.fromisoformat(req_ts.replace("Z", "+00:00"))
-                    resp_dt = _dt.datetime.fromisoformat(resp_ts.replace("Z", "+00:00"))
-                    remote_latencies.append((resp_dt - req_dt).total_seconds())
-            except Exception:
-                # ignore malformed timestamps
-                pass
-        except Exception as e:
-            print(f"[ERROR] Example #{idx} failed: {e}", file=sys.stderr)
-            continue
-        last = time.time()
-
-        # Tiered metrics
-        eff_tp, eff_fp, eff_fn = match_effective(expected_entities, actual_entities, redacted_output)
-        cor_tp, cor_fp, cor_fn = match_correct(expected_entities, actual_entities)
-        fac_tp, fac_fp, fac_fn = match_factual(expected_entities, actual_entities)
-
-        tp_eff += eff_tp; fp_eff += eff_fp; fn_eff += eff_fn
-        tp_cor += cor_tp; fp_cor += cor_fp; fn_cor += cor_fn
-        tp_fac += fac_tp; fp_fac += fac_fp; fn_fac += fac_fn
-
-        # For per-entity match (for verbose, legacy)
-        tp_e, fp_e, fn_e, exp_unmatched, act_unmatched = match_entities(expected_entities, actual_entities)
-        #full_ok = (fp_e == 0 and fn_e == 0)
-        considered_cnt += 1
-        full_ok = (fac_fp==0 and fac_fn==0)
-        if args.include_partials or full_ok:
-            correct_cnt += 1 if full_ok else 0
-
-        # Simplified FP/FN label extraction
-        fp_labels = [a["label"] for a in act_unmatched]
-        fn_labels = [e["label"] for e in exp_unmatched]
-
-        # If no FP found by lenient matcher but strict tiers recorded FP,
-        # compute FP labels based on 'Correct' logic (label + coords)
-        if not fp_labels and cor_fp:
-            fp_labels = [a["label"] for a in actual_entities
-                         if (a["label"], a["start"], a["end"]) not in
-                         {(e["label"], e["start"], e["end"]) for e in expected_entities}]
-
-        # Save FP / FN details
-        if fp_labels and fp_handle:
-            fp_handle.write(json.dumps({
-                "text": text,
-                "redacted_text": api_raw.get("result", {}).get("redacted_text"),
-                "expected_entities": expected_entities,
-                "actual_entities": actual_entities,
-                "false_positives": fp_labels
-            }, ensure_ascii=False) + "\n")
-        if fn_labels and fn_handle:
-            fn_handle.write(json.dumps({
-                "text": text,
-                "redacted_text": api_raw.get("result", {}).get("redacted_text"),
-                "expected_entities": expected_entities,
-                "actual_entities": actual_entities,
-                "false_negatives": fn_labels
-            }, ensure_ascii=False) + "\n")
-
-        # Verbose console
-        if args.verbose and (fp_e or fn_e):
-            if fp_e:
-                print(f"[FP] #{idx}: {fp_labels} was redacted | '{text}'")
-            if fn_e:
-                print(f"[FN] #{idx}: {fn_labels} was not redacted in | '{text}'")
-
-    if fp_handle:
-        fp_handle.close()
-    if fn_handle:
-        fn_handle.close()
+    for _h in [base_fp_handle, correct_fp_handle, factual_fp_handle,
+               base_fn_handle, correct_fn_handle, factual_fn_handle]:
+        if _h:
+            _h.close()
 
     # Move to new line after progress indicator
     print()
 
-    def make_stats(tp,fp,fn):
-        return metrics(tp,fp,fn,correct_cnt,considered_cnt,duration_sum)
+    def make_stats(tp, fp, fn, correct_val):
+        return metrics(tp, fp, fn, correct_val, considered_cnt, duration_sum)
 
     # Remote latency percentiles
     if remote_latencies:
@@ -580,9 +631,9 @@ def main() -> None:
     else:
         p50_latency = p95_latency = p99_latency = 0.0
 
-    stats_eff = make_stats(tp_eff,fp_eff,fn_eff)
-    stats_cor = make_stats(tp_cor,fp_cor,fn_cor)
-    stats_fac = make_stats(tp_fac,fp_fac,fn_fac)
+    stats_eff = make_stats(tp_eff, fp_eff, fn_eff, correct_eff_cnt)
+    stats_cor = make_stats(tp_cor, fp_cor, fn_cor, correct_cor_cnt)
+    stats_fac = make_stats(tp_fac, fp_fac, fn_fac, correct_fac_cnt)
 
     # Pretty print summary
     print("\n=== Pangea Redact Efficacy ===")
