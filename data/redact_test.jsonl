@@ -19,3 +19,4 @@
 {"text": "Wire transfer routing number 021000021 for Chase Manhattan.", "expected_entities": ["ABA_ROUTING_NUMBER"]}
 {"text": "Latitude 37.4220, Longitude ‑122.0841 marks the HQ.", "expected_entities": ["LOCATION"]}
 {"text": "Student email: s001234@university.edu; advisor: Prof. Emily Stone.", "expected_entities": ["EMAIL_ADDRESS", "PERSON"]}
+{"text":"We'll meet with Andrew very soon.","expected_entities":[{"label":"LOCATION","text":"Andrew","start":16,"end":22}]}
