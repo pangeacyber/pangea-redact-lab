@@ -136,4 +136,4 @@ Point `PANGEA_BASE_URL` to your edge/on‑prem Redact instance (e.g. viaportforw
 
 ---
 
-Madewith❤️by thePangeateam— contributions welcome!
+Made with ❤️ by the Pangeateam — contributions welcome!
