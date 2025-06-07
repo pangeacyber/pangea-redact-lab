@@ -8,7 +8,7 @@
 
 # Efficacy Testing Tool for Pangea Redact
 
-This **command‑line utility** measures how accurately the [PangeaRedact](https://pangea.cloud/docs/redact/) service identifies and redacts PII.  
+This **command‑line utility** measures how accurately the [Pangea Redact](https://pangea.cloud/docs/redact/) service identifies and redacts PII.  
 It runs your examples against the any Redact deployment (SaaS, Private Cloud/Edge), compares results to ground‑truth data, and reports **accuracy, precision, recall, and F1‑score**.  
 False‑positive and false‑negative examples can be exported for deeper analysis.
 
