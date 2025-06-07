@@ -130,7 +130,7 @@ A sample dataset is available at `data/redact_test.jsonl`.
 
 ---
 
-## EdgeDeployments
+## Edge Deployments
 
 Point `PANGEA_BASE_URL` to your edge/on‑prem Redact instance (e.g. viaportforwarding) and run the tool normally. See the [Edge guide](https://pangea.cloud/docs/deployment-models/edge/) for details.
 
