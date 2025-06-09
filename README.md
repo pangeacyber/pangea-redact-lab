@@ -89,7 +89,7 @@ The script prints a legend explaining *Base/Correct/Factual* tiers after the met
 
 ```bash
 #Quick run with verbose output
-poetry run python redact_lab.py -i data/sample.jsonl --verbose
+poetry run python redact_lab.py -i data/redact_test.jsonl --verbose
 
 #Strict mode + export errors
 poetry run python redact_lab.py -i data/sample.jsonl \
