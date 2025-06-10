@@ -21,7 +21,9 @@ Usage Example
         --fn_out fn.jsonl \
         --include_partials \
         --rps 2 \
-        --verbose
+        --verbose \
+        --redaction_type replacement
+    # Optionally include: --config_id <ID>
 
 Metrics & Scores
 ----------------
@@ -71,11 +73,23 @@ import requests
 import re
 
 
-def call_redact_api(base_url: str, token: str, text: str) -> Tuple[Set[str], Dict]:
+def call_redact_api(
+    base_url: str,
+    token: str,
+    text: str,
+    rules: List[str] | None = None,
+    redaction_type: str | None = None,
+    config_id: str | None = None,
+) -> Tuple[List[Dict], Dict]:
     """
     Invoke the Pangea Redact endpoint and return:
-      • a set of entity types that were redacted
+      • a list of entities (dicts) that were redacted
       • the full JSON response for reference
+    Optional parameters:
+      - rules: list of explicit redact rules to apply
+      - redaction_type: redaction type override for the provided rules
+      - config_id: optional config_id to include in the request
+      - If redaction_type == "replacement", each rule gets a redaction_value placeholder of the form "<RULE>".
     """
     endpoint = base_url.rstrip("/") + "/v1/redact"
     headers = {
@@ -83,7 +97,21 @@ def call_redact_api(base_url: str, token: str, text: str) -> Tuple[Set[str], Dic
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-    resp = requests.post(endpoint, headers=headers, json={"text": text, "debug": True}, timeout=30)
+    payload: Dict = {"text": text, "debug": True}
+    if rules:
+        payload["rules"] = rules
+        if redaction_type:
+            overrides: Dict[str, Dict[str, str]] = {}
+            for r in rules:
+                ov = {"redaction_type": redaction_type}
+                # When using replacement, also provide redaction_value like <EMAIL_ADDRESS>
+                if redaction_type.lower() == "replacement":
+                    ov["redaction_value"] = f"<{r}>"
+                overrides[r] = ov
+            payload["redaction_method_overrides"] = overrides
+    if config_id:
+        payload["config_id"] = config_id
+    resp = requests.post(endpoint, headers=headers, json=payload, timeout=30)
     if resp.status_code != 200:
         raise RuntimeError(f"API {resp.status_code}: {resp.text}")
     data = resp.json()
@@ -147,14 +175,6 @@ def spans_match(e: Dict, a: Dict, iou_thresh: float = 0.5) -> bool:
     if e.get("text") and a.get("text"):
         return e["text"].lower() in a["text"].lower()
     return False
-
-
-# ---------------------------------------------------------------------------
-# Heuristic to auto‑correct swapped 'label' / 'text' fields without a hardcoded list
-#
-# • A real label is usually ALL‑CAPS letters/digits/underscores, no spaces.
-# • A real text span usually contains lower‑case, digits with punctuation, or spaces.
-LABEL_PATTERN = re.compile(r'^[A-Z][A-Z0-9_]*$')   # e.g. DATE_TIME, SSN, IP_ADDRESS
 
 
 def match_entities(expected_list: List[Dict], actual_list: List[Dict]) -> Tuple[int, int, int, List[Dict], List[Dict]]:
@@ -415,6 +435,15 @@ def main() -> None:
                     help="Requests per second rate‑limit (0 = unlimited).")
     ap.add_argument("--verbose", action="store_true",
                     help="Print detailed FP/FN examples to stdout.")
+    ap.add_argument(
+        "--redaction_type",
+        default="replacement",
+        help="Redaction type override for all provided rules (default: replacement). When 'replacement' is used, the tool automatically supplies a placeholder like <EMAIL_ADDRESS>.",
+    )
+    ap.add_argument(
+        "--config_id",
+        help="Optional Pangea config_id to include in each request.",
+    )
     args = ap.parse_args()
 
     # ---------- threaded execution setup ----------
@@ -453,9 +482,21 @@ def main() -> None:
             else:
                 expected_entities = []
 
+            # Derive redact rules from expected_entities for this example
+            rule_list = list({
+                ent["label"] for ent in expected_entities
+                if isinstance(ent, dict) and ent.get("label")
+            })
             try:
                 start_time = time.time()
-                actual_entities, api_raw = call_redact_api(base_url, token, text)
+                actual_entities, api_raw = call_redact_api(
+                    base_url,
+                    token,
+                    text,
+                    rules=rule_list,
+                    redaction_type=args.redaction_type,
+                    config_id=args.config_id,
+                )
 
                 # Validate removal of expected text
                 redacted_output = api_raw.get("result", {}).get("redacted_text", "") or ""
