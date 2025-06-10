@@ -6,9 +6,9 @@ authors = ["Nikita <nikita.mader@pangea.cloud>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.11"
-requests = "^2.32.4"
-
+python = "^3.10"
+requests = "^2.32.3"
+argparse = "^1.4.0"
 
 [build-system]
 requires = ["poetry-core"]

@@ -31,7 +31,7 @@ False‑positive and false‑negative examples can be exported for deeper analys
 
    ```bash
    export PANGEA_BASE_URL="https://redact.<domain>"
-   export PANGEA_REDACT_TOKEN="<default-token>"
+   export PANGEA_REDACT_TOKEN="<pangea_token>"
    ```
 
 5. Install dependencies:
@@ -66,6 +66,8 @@ poetry run python redact_lab.py -i FILE [FILE ...]
                     [--include_partials]
                     [--rps RPS]
                     [--verbose]
+                    [--redaction_type TYPE]
+                    [--config_id CONFIG_ID]
 ```
 
 The script prints a legend explaining *Base/Correct/Factual* tiers after the metrics table.
@@ -81,6 +83,8 @@ The script prints a legend explaining *Base/Correct/Factual* tiers after the met
 |`--fp_out`,`--fn_out` | Save FP / FN examples (JSONL) |
 |`--include_partials` | Count **PARTIAL /MISMATCH** as failures (strict) |
 |`--rps` | Requests per second (default1) |
+|`--redaction_type` | Redaction type override for all rules (default **replacement**; when set to `replacement`, placeholders like `<EMAIL_ADDRESS>` are auto‑inserted) |
+|`--config_id` | Explicit Pangea `config_id` to include in each request |
 |`--verbose` | Print FP / FN examples to console |
 
 ---
@@ -97,6 +101,9 @@ poetry run python redact_lab.py -i data/sample.jsonl \
     --output_metrics results.json \
     --fp_out fp.jsonl \
     --fn_out fn.jsonl
+
+#Override to use mask redaction
+poetry run python redact_lab.py -i data/sample.jsonl --redaction_type mask
 
 #Higher throughput
 poetry run python redact_lab.py -i data/large.jsonl --rps 5
