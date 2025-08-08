@@ -19,4 +19,38 @@
 {"text": "Wire transfer routing number 021000021 for Chase Manhattan.", "expected_entities": ["ABA_ROUTING_NUMBER"]}
 {"text": "Latitude 37.4220, Longitude ‑122.0841 marks the HQ.", "expected_entities": ["LOCATION"]}
 {"text": "Student email: s001234@university.edu; advisor: Prof. Emily Stone.", "expected_entities": ["EMAIL_ADDRESS", "PERSON"]}
-{"text":"We'll meet with Andrew very soon.","expected_entities":[{"label":"LOCATION","text":"Andrew","start":16,"end":22}]}
+{"text":"We'll meet with Andrew very soon.","expected_entities":[{"label":"PERSON","text":"Andrew","start":16,"end":22}]}
+{"text": "Visit https://example.com/privacy for more info.", "expected_entities": [{"label": "URL", "text": "https://example.com/privacy", "start": 6, "end": 33}]}
+{"text": "She owes me $250 for the project.", "expected_entities": [{"label": "MONEY", "text": "$250", "start": 12, "end": 16}]}
+{"text": "Her SSN is 123-45-6789 and needs to be protected.", "expected_entities": [{"label": "US_SSN", "text": "123-45-6789", "start": 11, "end": 22}]}
+{"text": "You can reach tech support at 800-555-6789 ext. 123.", "expected_entities": [{"label": "PHONE_NUMBER", "text": "800-555-6789", "start": 30, "end": 42}]}
+{"text": "The donation amount was USD 1,500.00, confirmed by accounting.", "expected_entities": [{"label": "MONEY", "text": "USD 1,500.00", "start": 24, "end": 36}]}
+{"text": "Download the latest update from http://downloads.company.org/patches/latest.zip", "expected_entities": [{"label": "URL", "text": "http://downloads.company.org/patches/latest.zip", "start": 32, "end": 79}]}
+{"text": "You can find us at example.org/about or email us.", "expected_entities": [{"label": "URL", "text": "example.org/about", "start": 19, "end": 36}]}
+{"text": "Please review our blog at mysite.online/blog-post", "expected_entities": [{"label": "URL", "text": "mysite.online/blog-post", "start": 26, "end": 49}]}
+{"text": "Access server logs at 192.168.0.1:8080 after 5PM.", "expected_entities": [{"label": "IP_ADDRESS", "text": "192.168.0.1:8080", "start": 22, "end": 38}, {"label": "DATE_TIME", "text": "after 5PM", "start": 45, "end": 49}]}
+{"text": "Ping 10.10.10.10 for internal diagnostics.", "expected_entities": [{"label": "IP_ADDRESS", "text": "10.10.10.10", "start": 5, "end": 16}]}
+{"text": "Call us: (800) 321-4321 ext. 456 for support.", "expected_entities": [{"label": "PHONE_NUMBER", "text": "(800) 321-4321", "start": 9, "end": 24}]}
+{"text": "Amount due: CAD 3,000.75 payable to Acme Corp.", "expected_entities": [{"label": "MONEY", "text": "CAD 3,000.75", "start": 12, "end": 24}]}
+{"text": "Transaction date: March 2nd, 2024 at 10:00 AM EST.", "expected_entities": [{"label": "DATE_TIME", "text": "March 2nd, 2024 at 10:00 AM EST", "start": 18, "end": 49}]}
+{"text": "Professor James Moriarty has a PhD in Mathematics.", "expected_entities": [{"label": "PERSON", "text": "James Moriarty", "start": 10, "end": 24}]}
+{"text": "Reach us at doc.brown@hillvalley.edu for details.", "expected_entities": [{"label": "EMAIL_ADDRESS", "text": "doc.brown@hillvalley.edu", "start": 12, "end": 36}]}
+{"text": "Send documents to 4 Privet Drive, Little Whinging, Surrey.", "expected_entities": [{"label": "LOCATION", "text": "4 Privet Drive, Little Whinging, Surrey", "start": 18, "end": 57}]}
+{"text": "Routing #: 123456789 for account verification.", "expected_entities": [{"label": "ABA_ROUTING_NUMBER", "text": "123456789", "start": 11, "end": 20}]}
+{"text": "US passport A98765432 was flagged for review.", "expected_entities": [{"label": "US_PASSPORT", "text": "A98765432", "start": 12, "end": 21}]}
+{"text": "The charge was $10.00CAD, not USD.", "expected_entities": [{"label": "MONEY", "text": "$10.00CAD", "start": 15, "end": 24}]}
+{"text": "Reach us on 123-456-789—not a real number.", "expected_entities": []}
+{"text": "The address 999 Imaginary Rd, Faketown, ZZ 00000 isn't real.", "expected_entities": []}
+{"text": "Her email is jane.doe[at]example(dot)com", "expected_entities": []}
+{"text": "Please visit our site at example[dot]com.", "expected_entities": []}
+{"text": "Fake SSN: 123-45-678.", "expected_entities": []}
+{"text": "Not an IP: 999.999.999.999", "expected_entities": []}
+{"text": "Phone: (555) 1234", "expected_entities": []}
+{"text": "Suspicious routing number: 02100002 (missing digit)", "expected_entities": []}
+{"text": "Code X12345678X resembles a passport but isn't one.", "expected_entities": []}
+{"text": "Meeting was at noonish.", "expected_entities": []}
+{"text": "Server responded from IP 10.0.0.256.", "expected_entities": []}
+{"text": "USD 1,000.00 is the amount. Note: USD is trailing in the next one: 1,000.00USD", "expected_entities": [{"label": "MONEY", "text": "USD 1,000.00", "start": 0, "end": 12}, {"label": "MONEY", "text": "1,000.00USD", "start": 67, "end": 78}]}
+{"text": "Time: 12:60PM", "expected_entities": []}
+{"text": "Check out http://invalid_domain for a surprise.", "expected_entities": []}
+{"text": "Email us at help@@example..com", "expected_entities": []}
